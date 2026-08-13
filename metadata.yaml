@@ -1,0 +1,22 @@
+name: astrbot_plugin_content_companion
+display_name: 我会替你留住故事
+author: menglimi
+author_url: https://github.com/menglimi
+version: 0.1.0
+description: 陪伴体系的独立创作扩展，负责创作项目、续写、审校、记忆整理和作品封面，并与陪伴主插件保持兼容。
+desc: 独立创作与作品管理扩展。
+repo: https://github.com/menglimi/astrbot_plugin_content_companion
+category: AI 增强
+tags:
+  - 陪伴体系
+  - 创作
+  - 写作
+  - 作品管理
+support_platforms:
+  - aiocqhttp
+  - qq_official
+astrbot_version: ">=4.22.0"
+help: |
+  本插件为“我会永远陪着你”提供独立创作能力。安装并启用后，创作项目的生成、续写、审校、记忆整理和封面处理会通过扩展 API 接入。
+
+  旧版创作配置和 creative_projects 数据仍由陪伴主插件兼容读取，无需重新建立作品。

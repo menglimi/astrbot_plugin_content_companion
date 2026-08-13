@@ -1,0 +1,36 @@
+{
+  "enabled": {
+    "description": "启用独立创作服务",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后主插件自动回退到兼容创作实现。"
+  },
+  "migration": {
+    "description": "迁移兼容",
+    "type": "object",
+    "items": {
+      "reuse_private_companion_data": {
+        "description": "复用陪伴主插件创作数据",
+        "type": "bool",
+        "default": true,
+        "hint": "保留既有创作项目、正文、审校记录和封面索引。"
+      }
+    }
+  },
+  "creative": {
+    "description": "创作行为",
+    "type": "object",
+    "items": {
+      "enable_creative_writing": {"description": "启用私下创作行为", "type": "bool", "default": true},
+      "creative_inspiration_probability": {"description": "创作灵感概率", "type": "float", "default": 0.2},
+      "creative_share_probability": {"description": "作品分享概率", "type": "float", "default": 0.28},
+      "creative_chars_per_session": {"description": "每次创作字数", "type": "int", "default": 220},
+      "creative_max_active_projects": {"description": "最大进行中作品数", "type": "int", "default": 2},
+      "creative_direction_prompt": {"description": "创作方向提示词", "type": "text", "default": ""},
+      "enable_creative_cover_generation": {"description": "启用作品封面生成", "type": "bool", "default": false},
+      "CREATIVE_PROVIDER_ID": {"description": "创作模型 Provider", "type": "string", "default": ""},
+      "CREATIVE_OUTLINE_PROVIDER_ID": {"description": "创作大纲模型 Provider", "type": "string", "default": ""},
+      "CREATIVE_REVIEW_PROVIDER_ID": {"description": "创作审校模型 Provider", "type": "string", "default": ""}
+    }
+  }
+}

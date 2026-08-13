@@ -1,0 +1,18 @@
+{
+  "name": "astrbot_plugin_content_companion",
+  "version": "0.1.0",
+  "description": "Astrbot Plugin Content Companion plugin",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Astrbot Plugin Content Companion",
+    "shortDescription": "Use Astrbot Plugin Content Companion in Codex.",
+    "longDescription": "Astrbot Plugin Content Companion adds a local Codex plugin scaffold.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me use Astrbot Plugin Content Companion."
+  }
+}
