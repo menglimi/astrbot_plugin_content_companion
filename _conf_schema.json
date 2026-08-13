@@ -17,6 +17,17 @@
       }
     }
   },
+  "qzone": {
+    "description": "QQ 空间",
+    "type": "object",
+    "items": {
+      "enabled": {"description": "启用 QQ 空间联动", "type": "bool", "default": false},
+      "cookie": {"description": "QQ 空间 Cookie", "type": "text", "default": "", "hint": "仅 OneBot/aiocqhttp 可用；留空时兼容读取陪伴插件旧配置。"},
+      "life_publish_enabled": {"description": "自动发布生活说说", "type": "bool", "default": false},
+      "comment_inbox_enabled": {"description": "启用评论收件箱", "type": "bool", "default": false},
+      "generated_image_enabled": {"description": "说说允许配图", "type": "bool", "default": false}
+    }
+  },
   "creative": {
     "description": "创作行为",
     "type": "object",

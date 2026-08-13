@@ -13,12 +13,17 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
+try:
+    from quart import request
+except Exception:
+    request = None
 
 from .creative import CreativeMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_content_companion"
 PLUGIN_VERSION = "0.1.0"
+PAGE_API_PREFIX = f"/{PLUGIN_NAME}/page"
 _active_plugin: "ContentCompanionPlugin | None" = None
 
 
@@ -36,13 +41,18 @@ class ContentCompanionExtensionAPI:
         return owner if owner is not None else self._plugin.host
 
     def status(self) -> dict[str, Any]:
-        return {
+        value = {
             "installed": True,
             "enabled": self._plugin.enabled,
             "available": self._plugin.enabled,
             "mode": "standalone_with_legacy_readthrough",
             "data_owner": "content_companion",
         }
+        value["qzone"] = self._plugin.qzone_status()
+        return value
+
+    async def qzone_call(self, operation: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._plugin.qzone_call(operation, payload or {})
 
     async def _call(self, owner: Any, method: str, *args: Any, **kwargs: Any) -> Any:
         implementation = getattr(CreativeMixin, method, None)
@@ -359,6 +369,92 @@ class ContentCompanionPlugin(Star):
     async def initialize(self) -> None:
         logger.info("[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器；旧数据仅作首次迁移来源")
         self._task = asyncio.create_task(self._creative_loop())
+        self._register_qzone_page_api()
+
+    def _host_plugin(self) -> Any | None:
+        getter = getattr(self.context, "get_registered_star", None)
+        if not callable(getter):
+            return None
+        try:
+            metadata = getter("astrbot_plugin_private_companion")
+            return getattr(metadata, "star_cls", None) if metadata is not None else None
+        except Exception:
+            return None
+
+    def qzone_status(self) -> dict[str, Any]:
+        host = self._host_plugin()
+        summary_fn = getattr(host, "_qzone_summary", None) if host is not None else None
+        if not callable(summary_fn):
+            return {"installed": True, "enabled": False, "available": False, "reason": "private_companion_unavailable"}
+        try:
+            self._apply_qzone_config(host)
+            summary = summary_fn(getattr(host, "data", {}) or {})
+            qzone_cfg = self.config.get("qzone") if isinstance(self.config.get("qzone"), dict) else None
+            enabled = bool(qzone_cfg.get("enabled")) if qzone_cfg is not None and "enabled" in qzone_cfg else bool(summary.get("enabled"))
+            return {"installed": True, "enabled": enabled and bool(summary.get("enabled")), "available": bool(summary.get("available")), "delegated": True, "summary": summary}
+        except Exception as exc:
+            return {"installed": True, "enabled": False, "available": False, "reason": str(exc)[:160]}
+
+    def _apply_qzone_config(self, host: Any) -> None:
+        cfg = self.config.get("qzone") if isinstance(self.config.get("qzone"), dict) else {}
+        if not isinstance(cfg, dict):
+            return
+        mapping = {
+            "enabled": "enable_qzone_integration",
+            "life_publish_enabled": "enable_qzone_life_publish",
+            "comment_inbox_enabled": "enable_qzone_comment_inbox",
+            "generated_image_enabled": "enable_qzone_generated_image_publish",
+        }
+        for source, target in mapping.items():
+            if source in cfg:
+                setattr(host, target, bool(cfg.get(source)))
+        cookie = str(cfg.get("cookie") or "").strip()
+        if cookie:
+            setattr(host, "qzone_cookie", cookie)
+
+    async def qzone_call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+        host = self._host_plugin()
+        if host is not None:
+            self._apply_qzone_config(host)
+        page_api = getattr(host, "page_api", None) if host is not None else None
+        handlers = {
+            "status": "get_qzone_status", "feed": "get_qzone_feed", "detail": "get_qzone_detail",
+            "refresh": "refresh_qzone_cookies", "publish": "publish_qzone_post", "like": "like_qzone_post",
+            "comment": "comment_qzone_post", "delete": "delete_qzone_post",
+        }
+        handler = getattr(page_api, handlers.get(str(operation or "").strip().lower(), ""), None) if page_api else None
+        if not callable(handler):
+            return {"ok": False, "message": "陪伴主插件未加载或 QQ 空间操作不可用"}
+        try:
+            return await handler()
+        except Exception as exc:
+            logger.warning("[ContentCompanion] QQ 空间操作失败: %s", str(exc)[:160])
+            return {"ok": False, "message": str(exc)[:160]}
+
+    def _register_qzone_page_api(self) -> None:
+        register_api = getattr(self.context, "register_web_api", None)
+        if not callable(register_api):
+            return
+        register_api(f"{PAGE_API_PREFIX}/status", self._page_qzone_status, ["GET"], "Content Companion QQ Zone status")
+        register_api(f"{PAGE_API_PREFIX}/feed", self._page_qzone_feed, ["GET"], "Content Companion QQ Zone feed")
+        register_api(f"{PAGE_API_PREFIX}/projects", self._page_projects, ["GET"], "Content Companion projects")
+        register_api(f"{PAGE_API_PREFIX}/action", self._page_qzone_action, ["POST"], "Content Companion QQ Zone action")
+
+    async def _page_qzone_status(self) -> dict[str, Any]:
+        return {"ok": True, "data": self.qzone_status()}
+
+    async def _page_qzone_feed(self) -> dict[str, Any]:
+        return await self.qzone_call("feed", {})
+
+    async def _page_projects(self) -> dict[str, Any]:
+        projects = self.extension_api.list_projects()
+        return {"ok": True, "items": projects[-50:], "total": len(projects)}
+
+    async def _page_qzone_action(self) -> dict[str, Any]:
+        if request is None:
+            return {"ok": False, "message": "页面请求上下文不可用"}
+        payload = await request.get_json(silent=True) or {}
+        return await self.qzone_call(str(payload.get("action") or "status"), payload)
 
     async def _creative_loop(self) -> None:
         while True:

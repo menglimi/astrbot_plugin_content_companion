@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QQ 空间与书柜</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; background:#f5f7fb; color:#1f2937; }
+    body { margin:0; padding:28px; } .shell { max-width:1100px; margin:auto; }
+    header { display:flex; justify-content:space-between; gap:18px; align-items:end; margin-bottom:22px; }
+    h1 { margin:0 0 6px; font-size:28px; } p { margin:0; color:#64748b; }
+    .actions { display:flex; gap:10px; } button { border:0; border-radius:12px; padding:10px 15px; cursor:pointer; background:#e2e8f0; color:#1e293b; } button.primary { background:#2563eb; color:white; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; } .card { background:white; border:1px solid #e5e7eb; border-radius:18px; padding:18px; box-shadow:0 8px 24px #1e293b0b; }
+    .metric strong { display:block; font-size:24px; margin-top:8px; } .metric small { color:#64748b; }
+    .panel { margin-top:16px; } .panel h2 { margin:0 0 12px; font-size:18px; } .status { display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #eef2f7; }
+    .status:last-child { border-bottom:0; } .feed { display:grid; gap:10px; max-height:520px; overflow:auto; } .post { border:1px solid #e5e7eb; border-radius:14px; padding:14px; } .post time { color:#94a3b8; font-size:12px; }
+    textarea { width:100%; min-height:90px; border:1px solid #dbe2ea; border-radius:12px; padding:10px; box-sizing:border-box; resize:vertical; } .notice { margin-top:12px; color:#475569; }
+    @media (max-width:720px) { body { padding:16px; } header { display:block; } .actions { margin-top:14px; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><div><h1>QQ 空间与书柜</h1><p>作品、动态与公开表达统一管理</p></div><div class="actions"><button id="refresh">刷新状态</button><button id="refreshFeed">读取动态</button></div></header>
+    <section class="grid"><article class="card metric"><span>QQ 空间</span><strong id="qzoneState">读取中</strong><small id="qzoneReason">等待陪伴主插件</small></article><article class="card metric"><span>创作作品</span><strong id="projectCount">-</strong><small>由内容扩展维护</small></article><article class="card metric"><span>数据模式</span><strong>已挂载</strong><small>沿用旧数据兼容迁移</small></article></section>
+    <section class="card panel"><h2>QQ 空间状态</h2><div id="status"></div></section>
+    <section class="card panel"><h2>发布公开说说</h2><textarea id="content" placeholder="写点想公开留下的话"></textarea><div class="actions"><button class="primary" id="publish">发布到 QQ 空间</button></div><div class="notice" id="notice"></div></section>
+    <section class="card panel"><h2>最近动态</h2><div class="feed" id="feed"><p>尚未读取</p></div></section>
+    <section class="card panel"><h2>书柜作品</h2><div class="feed" id="projects"><p>读取中...</p></div></section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>
