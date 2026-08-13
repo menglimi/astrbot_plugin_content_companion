@@ -36,7 +36,13 @@ class ContentCompanionExtensionAPI:
         return owner if owner is not None else self._plugin.host
 
     def status(self) -> dict[str, Any]:
-        return {"installed": True, "enabled": self._plugin.enabled, "available": self._plugin.enabled, "mode": "delegated_compatibility", "data_owner": "private_companion"}
+        return {
+            "installed": True,
+            "enabled": self._plugin.enabled,
+            "available": self._plugin.enabled,
+            "mode": "standalone_with_legacy_readthrough",
+            "data_owner": "content_companion",
+        }
 
     async def _call(self, owner: Any, method: str, *args: Any, **kwargs: Any) -> Any:
         implementation = getattr(CreativeMixin, method, None)
@@ -241,6 +247,19 @@ class StandaloneCreativeHost(CreativeMixin):
     def _bot_currently_idle_for_creative_writing(self) -> bool:
         return True
 
+    def _creative_inspiration_source(self) -> dict[str, str] | None:
+        source = super()._creative_inspiration_source()
+        if source:
+            return source
+        direction = str(self.creative_direction_prompt or "").strip()
+        if direction:
+            return {"source": "configured", "label": "创作方向", "text": direction[:220]}
+        # Standalone mode has no companion daily-state stream to seed ideas.
+        # Keep the same probabilistic behavior while providing a quiet seed.
+        if not self._creative_projects() and random.random() <= 0.2:
+            return {"source": "standalone", "label": "窗边灵感", "text": "一个适合慢慢展开的日常小画面"}
+        return None
+
     def _creative_has_pending_proactive_plan(self) -> bool:
         return False
 
@@ -338,7 +357,7 @@ class ContentCompanionPlugin(Star):
         _active_plugin = self
 
     async def initialize(self) -> None:
-        logger.info("[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器")
+        logger.info("[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器；旧数据仅作首次迁移来源")
         self._task = asyncio.create_task(self._creative_loop())
 
     async def _creative_loop(self) -> None:
