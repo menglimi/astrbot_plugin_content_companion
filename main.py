@@ -22,9 +22,58 @@ from .creative import CreativeMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_content_companion"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.1"
 PAGE_API_PREFIX = f"/{PLUGIN_NAME}/page"
 _active_plugin: "ContentCompanionPlugin | None" = None
+
+_CREATIVE_CONFIG_DEFAULTS = {
+    "enable_creative_writing": True,
+    "creative_inspiration_probability": 0.2,
+    "creative_share_probability": 0.28,
+    "creative_chars_per_session": 220,
+    "creative_max_active_projects": 2,
+    "creative_direction_prompt": "",
+    "enable_creative_cover_generation": False,
+    "CREATIVE_PROVIDER_ID": "",
+    "CREATIVE_OUTLINE_PROVIDER_ID": "",
+    "CREATIVE_REVIEW_PROVIDER_ID": "",
+}
+_CREATIVE_RUNTIME_ATTRIBUTES = {
+    "enable_creative_writing": "enable_creative_writing",
+    "creative_inspiration_probability": "creative_inspiration_probability",
+    "creative_share_probability": "creative_share_probability",
+    "creative_chars_per_session": "creative_chars_per_session",
+    "creative_max_active_projects": "creative_max_active_projects",
+    "creative_direction_prompt": "creative_direction_prompt",
+    "enable_creative_cover_generation": "enable_creative_cover_generation",
+    "CREATIVE_PROVIDER_ID": "creative_provider_id",
+    "CREATIVE_OUTLINE_PROVIDER_ID": "creative_outline_provider_id",
+    "CREATIVE_REVIEW_PROVIDER_ID": "creative_review_provider_id",
+}
+_QZONE_CONFIG_DEFAULTS = {
+    "enabled": False,
+    "cookie": "",
+    "life_publish_enabled": False,
+    "comment_inbox_enabled": False,
+    "generated_image_enabled": False,
+}
+_QZONE_RUNTIME_ATTRIBUTES = {
+    "enabled": "enable_qzone_integration",
+    "cookie": "qzone_cookie",
+    "life_publish_enabled": "enable_qzone_life_publish",
+    "comment_inbox_enabled": "enable_qzone_comment_inbox",
+    "generated_image_enabled": "enable_qzone_generated_image_publish",
+}
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on", "enabled", "开启", "是"}:
+            return True
+        if normalized in {"false", "0", "no", "off", "disabled", "关闭", "否", ""}:
+            return False
+    return default if value is None else bool(value)
 
 
 def get_content_companion_api() -> Any | None:
@@ -41,12 +90,17 @@ class ContentCompanionExtensionAPI:
         return owner if owner is not None else self._plugin.host
 
     def status(self) -> dict[str, Any]:
+        migration_completed = bool(self._plugin.host.data.get("legacy_migration_completed"))
         value = {
             "installed": True,
             "enabled": self._plugin.enabled,
             "available": self._plugin.enabled,
             "mode": "standalone_with_legacy_readthrough",
             "data_owner": "content_companion",
+            "migration": {
+                "completed": migration_completed,
+                "pending": self._plugin._reuse_private_companion_data() and not migration_completed,
+            },
         }
         value["qzone"] = self._plugin.qzone_status()
         return value
@@ -138,7 +192,10 @@ class StandaloneCreativeHost(CreativeMixin):
         self._creative_cover_generation_locks: dict[str, asyncio.Lock] = {}
         self._load_data()
         self._migrate_legacy_state()
-        cfg = plugin.config
+        self._sync_config()
+
+    def _sync_config(self) -> None:
+        cfg = self.plugin.config
         legacy = self._legacy_config()
         creative_cfg = cfg.get("creative") if isinstance(cfg.get("creative"), dict) else cfg
         def value(name: str, default: Any) -> Any:
@@ -146,16 +203,16 @@ class StandaloneCreativeHost(CreativeMixin):
             if current not in (None, ""):
                 return current
             return legacy.get(name, default)
-        self.enable_creative_writing = bool(value("enable_creative_writing", True))
-        self.enable_creative_cover_generation = bool(value("enable_creative_cover_generation", False))
+        self.enable_creative_writing = _as_bool(value("enable_creative_writing", True), True)
+        self.enable_creative_cover_generation = _as_bool(value("enable_creative_cover_generation", False), False)
         self.enable_photo_text_action = self._image_companion_api() is not None
         self.enable_photo_reference_image = False
         self.photo_generation_prompt_format = "traditional"
         self.photo_persona_reference_image_path = ""
-        self.creative_inspiration_probability = float(value("creative_inspiration_probability", 0.22) or 0.22)
-        self.creative_share_probability = float(value("creative_share_probability", 0.12) or 0.12)
-        self.creative_max_active_projects = max(1, int(value("creative_max_active_projects", 3) or 3))
-        self.creative_chars_per_session = max(120, int(value("creative_chars_per_session", 520) or 520))
+        self.creative_inspiration_probability = float(value("creative_inspiration_probability", 0.2) or 0.2)
+        self.creative_share_probability = float(value("creative_share_probability", 0.28) or 0.28)
+        self.creative_max_active_projects = max(1, int(value("creative_max_active_projects", 2) or 2))
+        self.creative_chars_per_session = max(120, int(value("creative_chars_per_session", 220) or 220))
         self.creative_provider_id = str(value("CREATIVE_PROVIDER_ID", "") or "")
         self.creative_outline_provider_id = str(value("CREATIVE_OUTLINE_PROVIDER_ID", "") or self.creative_provider_id)
         self.creative_review_provider_id = str(value("CREATIVE_REVIEW_PROVIDER_ID", "") or self.creative_provider_id)
@@ -179,7 +236,7 @@ class StandaloneCreativeHost(CreativeMixin):
             self.data["creative_projects"] = []
 
     def _migrate_legacy_state(self) -> None:
-        if self.data.get("creative_projects"):
+        if self.data.get("creative_projects") or not self.plugin._reuse_private_companion_data():
             return
         source = getattr(self.plugin.context, "private_companion_data", None)
         if not isinstance(source, dict):
@@ -361,15 +418,142 @@ class ContentCompanionPlugin(Star):
         super().__init__(context)
         self.context = context
         self.config = config
-        self.enabled = bool(config.get("enabled", True))
+        self.enabled = _as_bool(config.get("enabled", True), True)
         self.host = StandaloneCreativeHost(self)
         self.extension_api = ContentCompanionExtensionAPI(self)
+        self._migration_task: asyncio.Task | None = None
         _active_plugin = self
 
     async def initialize(self) -> None:
-        logger.info("[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器；旧数据仅作首次迁移来源")
+        try:
+            migrated = await self._try_legacy_migration()
+        except Exception as exc:
+            migrated = False
+            logger.warning(
+                "[ContentCompanion] 旧版内容迁移暂不可用，保持兼容状态并稍后重试: %s",
+                str(exc)[:160],
+            )
+        if not migrated:
+            self._migration_task = asyncio.create_task(self._migration_loop())
+        logger.info(
+            "[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器；旧数据迁移=%s",
+            "completed" if migrated else "pending",
+        )
         self._task = asyncio.create_task(self._creative_loop())
         self._register_qzone_page_api()
+
+    def _reuse_private_companion_data(self) -> bool:
+        migration = self.config.get("migration")
+        if isinstance(migration, dict) and "reuse_private_companion_data" in migration:
+            return _as_bool(migration.get("reuse_private_companion_data"), True)
+        return _as_bool(self.config.get("reuse_private_companion_data", True), True)
+
+    @staticmethod
+    def _normalized_for_default(value: Any, default: Any) -> Any:
+        if isinstance(default, bool):
+            return _as_bool(value, default)
+        if isinstance(default, float):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+        if isinstance(default, int):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+        return str(value or "").strip()
+
+    def _migrate_config_group(
+        self,
+        group_name: str,
+        defaults: dict[str, Any],
+        runtime_attributes: dict[str, str],
+        legacy_host: Any,
+    ) -> bool:
+        group = self.config.get(group_name)
+        if not isinstance(group, dict):
+            group = {}
+            self.config[group_name] = group
+        changed = False
+        for key, default in defaults.items():
+            legacy_value = getattr(legacy_host, runtime_attributes[key], None)
+            if legacy_value is None:
+                continue
+            current = group.get(key, default)
+            if self._normalized_for_default(current, default) != self._normalized_for_default(default, default):
+                continue
+            normalized_legacy = self._normalized_for_default(legacy_value, default)
+            if self._normalized_for_default(current, default) == normalized_legacy:
+                continue
+            group[key] = normalized_legacy
+            changed = True
+        return changed
+
+    def _migrate_legacy_projects(self, legacy_host: Any) -> bool:
+        if self.host.data.get("creative_projects"):
+            return False
+        source = getattr(legacy_host, "data", None)
+        projects = source.get("creative_projects") if isinstance(source, dict) else None
+        if not isinstance(projects, list) or not projects:
+            return False
+        self.host.data["creative_projects"] = json.loads(
+            json.dumps(projects, ensure_ascii=False)
+        )
+        return True
+
+    async def _try_legacy_migration(self) -> bool:
+        if self.host.data.get("legacy_migration_completed"):
+            return True
+        if not self._reuse_private_companion_data():
+            self.host.data["legacy_migration_completed"] = True
+            self.host.data["legacy_migration_mode"] = "independent"
+            self.host._save_data_sync()
+            return True
+        legacy_host = self._host_plugin()
+        if legacy_host is None:
+            return False
+        projects_changed = self._migrate_legacy_projects(legacy_host)
+        config_changed = self._migrate_config_group(
+            "creative",
+            _CREATIVE_CONFIG_DEFAULTS,
+            _CREATIVE_RUNTIME_ATTRIBUTES,
+            legacy_host,
+        )
+        config_changed = self._migrate_config_group(
+            "qzone",
+            _QZONE_CONFIG_DEFAULTS,
+            _QZONE_RUNTIME_ATTRIBUTES,
+            legacy_host,
+        ) or config_changed
+        if config_changed:
+            saver = getattr(self.config, "save_config", None)
+            if callable(saver):
+                try:
+                    saver()
+                except Exception as exc:
+                    logger.warning("[ContentCompanion] 保存兼容配置失败: %s", str(exc)[:160])
+        self.host._sync_config()
+        self.host.data["legacy_migration_completed"] = True
+        self.host.data["legacy_migration_mode"] = "imported"
+        self.host.data["legacy_migration_at"] = time.time()
+        self.host._save_data_sync()
+        logger.info(
+            "[ContentCompanion] 旧版内容迁移完成: projects=%s config=%s",
+            "imported" if projects_changed else "kept",
+            "imported" if config_changed else "kept",
+        )
+        return True
+
+    async def _migration_loop(self) -> None:
+        for _ in range(24):
+            try:
+                if await self._try_legacy_migration():
+                    return
+            except Exception as exc:
+                logger.debug("[ContentCompanion] 旧版内容迁移重试失败: %s", str(exc)[:160])
+            await asyncio.sleep(5)
+        logger.warning("[ContentCompanion] 主插件在迁移等待窗口内未就绪，将在下次启动继续迁移")
 
     def _host_plugin(self) -> Any | None:
         getter = getattr(self.context, "get_registered_star", None)
@@ -390,12 +574,21 @@ class ContentCompanionPlugin(Star):
             self._apply_qzone_config(host)
             summary = summary_fn(getattr(host, "data", {}) or {})
             qzone_cfg = self.config.get("qzone") if isinstance(self.config.get("qzone"), dict) else None
-            enabled = bool(qzone_cfg.get("enabled")) if qzone_cfg is not None and "enabled" in qzone_cfg else bool(summary.get("enabled"))
+            migration_pending = self._reuse_private_companion_data() and not self.host.data.get("legacy_migration_completed")
+            enabled = (
+                bool(summary.get("enabled"))
+                if migration_pending
+                else _as_bool(qzone_cfg.get("enabled"), False)
+                if qzone_cfg is not None and "enabled" in qzone_cfg
+                else bool(summary.get("enabled"))
+            )
             return {"installed": True, "enabled": enabled and bool(summary.get("enabled")), "available": bool(summary.get("available")), "delegated": True, "summary": summary}
         except Exception as exc:
             return {"installed": True, "enabled": False, "available": False, "reason": str(exc)[:160]}
 
     def _apply_qzone_config(self, host: Any) -> None:
+        if self._reuse_private_companion_data() and not self.host.data.get("legacy_migration_completed"):
+            return
         cfg = self.config.get("qzone") if isinstance(self.config.get("qzone"), dict) else {}
         if not isinstance(cfg, dict):
             return
@@ -407,7 +600,7 @@ class ContentCompanionPlugin(Star):
         }
         for source, target in mapping.items():
             if source in cfg:
-                setattr(host, target, bool(cfg.get(source)))
+                setattr(host, target, _as_bool(cfg.get(source), False))
         cookie = str(cfg.get("cookie") or "").strip()
         if cookie:
             setattr(host, "qzone_cookie", cookie)
@@ -467,13 +660,14 @@ class ContentCompanionPlugin(Star):
             await asyncio.sleep(15 * 60)
 
     async def terminate(self) -> None:
-        task = getattr(self, "_task", None)
-        if task is not None and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        tasks = [getattr(self, "_task", None), getattr(self, "_migration_task", None)]
+        for task in tasks:
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in tasks if task is not None),
+            return_exceptions=True,
+        )
 
     @filter.command("创作")
     async def creative_command(self, event: AstrMessageEvent):
