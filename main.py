@@ -22,8 +22,11 @@ from .creative import CreativeMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_content_companion"
-PLUGIN_VERSION = "0.2.1"
+PLUGIN_VERSION = "0.2.2"
 PAGE_API_PREFIX = f"/{PLUGIN_NAME}/page"
+MANAGED_PAGE_MESSAGE = (
+    "当前能力已由“我会永远陪着你”统一管理，请前往陪伴插件的“陪伴面板”继续操作。"
+)
 _active_plugin: "ContentCompanionPlugin | None" = None
 
 _CREATIVE_CONFIG_DEFAULTS = {
@@ -565,11 +568,21 @@ class ContentCompanionPlugin(Star):
         except Exception:
             return None
 
+    def _managed_by_private_companion(self) -> bool:
+        return self._host_plugin() is not None
+
     def qzone_status(self) -> dict[str, Any]:
         host = self._host_plugin()
+        managed = host is not None
         summary_fn = getattr(host, "_qzone_summary", None) if host is not None else None
         if not callable(summary_fn):
-            return {"installed": True, "enabled": False, "available": False, "reason": "private_companion_unavailable"}
+            return {
+                "installed": True,
+                "enabled": False,
+                "available": False,
+                "managed_by_private_companion": managed,
+                "reason": "private_companion_unavailable",
+            }
         try:
             self._apply_qzone_config(host)
             summary = summary_fn(getattr(host, "data", {}) or {})
@@ -582,9 +595,22 @@ class ContentCompanionPlugin(Star):
                 if qzone_cfg is not None and "enabled" in qzone_cfg
                 else bool(summary.get("enabled"))
             )
-            return {"installed": True, "enabled": enabled and bool(summary.get("enabled")), "available": bool(summary.get("available")), "delegated": True, "summary": summary}
+            return {
+                "installed": True,
+                "enabled": enabled and bool(summary.get("enabled")),
+                "available": bool(summary.get("available")),
+                "delegated": True,
+                "managed_by_private_companion": True,
+                "summary": summary,
+            }
         except Exception as exc:
-            return {"installed": True, "enabled": False, "available": False, "reason": str(exc)[:160]}
+            return {
+                "installed": True,
+                "enabled": False,
+                "available": False,
+                "managed_by_private_companion": managed,
+                "reason": str(exc)[:160],
+            }
 
     def _apply_qzone_config(self, host: Any) -> None:
         if self._reuse_private_companion_data() and not self.host.data.get("legacy_migration_completed"):
@@ -644,6 +670,12 @@ class ContentCompanionPlugin(Star):
         return {"ok": True, "items": projects[-50:], "total": len(projects)}
 
     async def _page_qzone_action(self) -> dict[str, Any]:
+        if self._managed_by_private_companion():
+            return {
+                "ok": False,
+                "status": "managed_by_private_companion",
+                "message": MANAGED_PAGE_MESSAGE,
+            }
         if request is None:
             return {"ok": False, "message": "页面请求上下文不可用"}
         payload = await request.get_json(silent=True) or {}

@@ -157,3 +157,29 @@ def test_pending_migration_does_not_override_legacy_qzone_state() -> None:
     assert status["enabled"] is True
     assert legacy.enable_qzone_integration is True
     assert legacy.enable_qzone_life_publish is True
+
+
+def test_qzone_status_marks_runtime_takeover() -> None:
+    plugin = _migration_plugin(_Config({"migration": {"reuse_private_companion_data": False}}))
+    host = SimpleNamespace(
+        data={},
+        _qzone_summary=lambda _data: {"enabled": True, "available": True},
+    )
+    plugin._host_plugin = lambda: host
+
+    status = plugin.qzone_status()
+
+    assert status["managed_by_private_companion"] is True
+
+
+def test_page_action_is_locked_during_runtime_takeover() -> None:
+    async def run() -> None:
+        plugin = ContentCompanionPlugin.__new__(ContentCompanionPlugin)
+        plugin._managed_by_private_companion = lambda: True
+
+        result = await plugin._page_qzone_action()
+
+        assert result["ok"] is False
+        assert result["status"] == "managed_by_private_companion"
+
+    asyncio.run(run())

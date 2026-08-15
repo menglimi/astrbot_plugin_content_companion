@@ -2,7 +2,7 @@ name: astrbot_plugin_content_companion
 display_name: 我会替你留住故事
 author: menglimi
 author_url: https://github.com/menglimi
-version: 0.2.1
+version: 0.2.2
 description: 陪伴体系的独立创作扩展，负责创作项目、续写、审校、记忆整理和作品封面，并与陪伴主插件保持兼容。
 desc: 独立创作与作品管理扩展。
 repo: https://github.com/menglimi/astrbot_plugin_content_companion
