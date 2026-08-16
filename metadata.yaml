@@ -16,9 +16,6 @@ support_platforms:
   - aiocqhttp
   - qq_official
 astrbot_version: ">=4.22.0"
-pages:
-  - name: qzone-companion
-    title: QQ 空间与书柜
 help: |
   本插件为“我会永远陪着你”提供独立创作、书柜和 QQ 空间能力。安装并启用后，创作项目的生成、续写、审校、记忆整理、作品封面和 QQ 空间操作会通过扩展 API 接入。
 
