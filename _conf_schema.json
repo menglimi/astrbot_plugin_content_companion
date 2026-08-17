@@ -1,9 +1,9 @@
 {
   "enabled": {
-    "description": "启用独立创作服务",
+    "description": "启用创作扩展服务（配置请到陪伴面板）",
     "type": "bool",
     "default": true,
-    "hint": "关闭后主插件自动回退到兼容创作实现。"
+    "hint": "创作扩展由“我会永远陪着你”统一接管；关闭后主插件回退到兼容创作实现。"
   },
   "migration": {
     "description": "迁移兼容",

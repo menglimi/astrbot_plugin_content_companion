@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Standalone creative service boundary for the companion series."""
+"""Creative service boundary owned by the private companion host."""
 from __future__ import annotations
 
 import asyncio
 import json
-import random
 import sys
 import time
 from pathlib import Path
@@ -13,20 +12,11 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
-try:
-    from quart import request
-except Exception:
-    request = None
-
 from .creative import CreativeMixin
 
 
 PLUGIN_NAME = "astrbot_plugin_content_companion"
 PLUGIN_VERSION = "0.2.2"
-PAGE_API_PREFIX = f"/{PLUGIN_NAME}/page"
-MANAGED_PAGE_MESSAGE = (
-    "当前能力已由“我会永远陪着你”统一管理，请前往陪伴插件的“陪伴面板”继续操作。"
-)
 _active_plugin: "ContentCompanionPlugin | None" = None
 
 _CREATIVE_CONFIG_DEFAULTS = {
@@ -93,19 +83,28 @@ class ContentCompanionExtensionAPI:
         return owner if owner is not None else self._plugin.host
 
     def status(self) -> dict[str, Any]:
+        managed = self._plugin._managed_by_private_companion()
         migration_completed = bool(self._plugin.host.data.get("legacy_migration_completed"))
         value = {
             "installed": True,
             "enabled": self._plugin.enabled,
-            "available": self._plugin.enabled,
-            "mode": "standalone_with_legacy_readthrough",
+            "available": bool(self._plugin.enabled and managed),
+            "managed_by_private_companion": managed,
+            "reason": "" if managed else "private_companion_required",
+            "mode": "managed" if managed else "unavailable",
             "data_owner": "content_companion",
             "migration": {
                 "completed": migration_completed,
                 "pending": self._plugin._reuse_private_companion_data() and not migration_completed,
             },
         }
-        value["qzone"] = self._plugin.qzone_status()
+        value["qzone"] = self._plugin.qzone_status() if managed else {
+            "installed": True,
+            "enabled": False,
+            "available": False,
+            "managed_by_private_companion": False,
+            "reason": "private_companion_required",
+        }
         return value
 
     async def qzone_call(self, operation: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -141,12 +140,6 @@ class ContentCompanionExtensionAPI:
 
     async def maybe_generate_creative_cover(self, owner: Any, project_id: str, *, force: bool = False) -> Any:
         return await self._call(owner, "_maybe_generate_creative_cover", project_id, force=force)
-
-    async def standalone_advance(self) -> bool:
-        if not self._plugin.enabled:
-            return False
-        await self._call(None, "_maybe_advance_creative_projects")
-        return True
 
     def list_projects(self, owner: Any | None = None) -> list[dict[str, Any]]:
         host = self._owner(owner)
@@ -299,7 +292,7 @@ class StandaloneCreativeHost(CreativeMixin):
             response = await self.context.llm_generate(**kwargs)
             return str(getattr(response, "completion_text", "") or "").strip() or None
         except Exception as exc:
-            logger.warning("[ContentCompanion] 独立创作模型调用失败: %s", str(exc)[:160])
+            logger.warning("[ContentCompanion] 创作扩展模型调用失败: %s", str(exc)[:160])
             return None
 
     @staticmethod
@@ -324,10 +317,6 @@ class StandaloneCreativeHost(CreativeMixin):
         direction = str(self.creative_direction_prompt or "").strip()
         if direction:
             return {"source": "configured", "label": "创作方向", "text": direction[:220]}
-        # Standalone mode has no companion daily-state stream to seed ideas.
-        # Keep the same probabilistic behavior while providing a quiet seed.
-        if not self._creative_projects() and random.random() <= 0.2:
-            return {"source": "standalone", "label": "窗边灵感", "text": "一个适合慢慢展开的日常小画面"}
         return None
 
     def _creative_has_pending_proactive_plan(self) -> bool:
@@ -400,21 +389,21 @@ class StandaloneCreativeHost(CreativeMixin):
         api = self._image_companion_api()
         generator = getattr(api, "generate_for_companion", None) if api is not None else None
         if not callable(generator):
-            return "独立创作扩展", "", "未安装或未启用生图扩展"
+            return "创作扩展", "", "未安装或未启用生图扩展"
         try:
             response = await generator(self, dict(kwargs))
         except Exception as exc:
-            return "独立生图服务", "", f"封面生成失败：{str(exc)[:120]}"
+            return "生图扩展", "", f"封面生成失败：{str(exc)[:120]}"
         if not isinstance(response, dict):
-            return "独立生图服务", "", "生图扩展返回无效结果"
+            return "生图扩展", "", "生图扩展返回无效结果"
         return (
-            str(response.get("backend") or "独立生图服务"),
+            str(response.get("backend") or "生图扩展"),
             str(response.get("image_path") or ""),
             str(response.get("note") or ""),
         )
 
 
-@register(PLUGIN_NAME, "menglimi", "我会替你留住故事：陪伴体系的独立创作与作品管理扩展。", PLUGIN_VERSION)
+@register(PLUGIN_NAME, "menglimi", "我会替你留住故事：陪伴体系的创作与作品管理扩展。", PLUGIN_VERSION)
 class ContentCompanionPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         global _active_plugin
@@ -439,11 +428,10 @@ class ContentCompanionPlugin(Star):
         if not migrated:
             self._migration_task = asyncio.create_task(self._migration_loop())
         logger.info(
-            "[ContentCompanion] 独立创作扩展已加载，使用独立数据与创作执行器；旧数据迁移=%s",
+            "[ContentCompanion] 创作扩展已加载，页面与运行入口由陪伴主插件统一管理；旧数据迁移=%s",
             "completed" if migrated else "pending",
         )
-        self._task = asyncio.create_task(self._creative_loop())
-        self._register_qzone_page_api()
+        self._task = None
 
     def _reuse_private_companion_data(self) -> bool:
         migration = self.config.get("migration")
@@ -559,6 +547,19 @@ class ContentCompanionPlugin(Star):
         logger.warning("[ContentCompanion] 主插件在迁移等待窗口内未就绪，将在下次启动继续迁移")
 
     def _host_plugin(self) -> Any | None:
+        for module_name in (
+            "data.plugins.astrbot_plugin_private_companion.main",
+            "astrbot_plugin_private_companion.main",
+        ):
+            module = sys.modules.get(module_name)
+            getter = getattr(module, "get_private_companion_api", None) if module is not None else None
+            try:
+                api = getter() if callable(getter) else None
+            except Exception:
+                api = None
+            host = getattr(api, "_plugin", None) if api is not None else None
+            if host is not None:
+                return host
         getter = getattr(self.context, "get_registered_star", None)
         if not callable(getter):
             return None
@@ -650,47 +651,6 @@ class ContentCompanionPlugin(Star):
             logger.warning("[ContentCompanion] QQ 空间操作失败: %s", str(exc)[:160])
             return {"ok": False, "message": str(exc)[:160]}
 
-    def _register_qzone_page_api(self) -> None:
-        register_api = getattr(self.context, "register_web_api", None)
-        if not callable(register_api):
-            return
-        register_api(f"{PAGE_API_PREFIX}/status", self._page_qzone_status, ["GET"], "Content Companion QQ Zone status")
-        register_api(f"{PAGE_API_PREFIX}/feed", self._page_qzone_feed, ["GET"], "Content Companion QQ Zone feed")
-        register_api(f"{PAGE_API_PREFIX}/projects", self._page_projects, ["GET"], "Content Companion projects")
-        register_api(f"{PAGE_API_PREFIX}/action", self._page_qzone_action, ["POST"], "Content Companion QQ Zone action")
-
-    async def _page_qzone_status(self) -> dict[str, Any]:
-        return {"ok": True, "data": self.qzone_status()}
-
-    async def _page_qzone_feed(self) -> dict[str, Any]:
-        return await self.qzone_call("feed", {})
-
-    async def _page_projects(self) -> dict[str, Any]:
-        projects = self.extension_api.list_projects()
-        return {"ok": True, "items": projects[-50:], "total": len(projects)}
-
-    async def _page_qzone_action(self) -> dict[str, Any]:
-        if self._managed_by_private_companion():
-            return {
-                "ok": False,
-                "status": "managed_by_private_companion",
-                "message": MANAGED_PAGE_MESSAGE,
-            }
-        if request is None:
-            return {"ok": False, "message": "页面请求上下文不可用"}
-        payload = await request.get_json(silent=True) or {}
-        return await self.qzone_call(str(payload.get("action") or "status"), payload)
-
-    async def _creative_loop(self) -> None:
-        while True:
-            try:
-                await self.extension_api.standalone_advance()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("[ContentCompanion] 独立创作推进失败: %s", str(exc)[:160])
-            await asyncio.sleep(15 * 60)
-
     async def terminate(self) -> None:
         tasks = [getattr(self, "_task", None), getattr(self, "_migration_task", None)]
         for task in tasks:
@@ -703,8 +663,11 @@ class ContentCompanionPlugin(Star):
 
     @filter.command("创作")
     async def creative_command(self, event: AstrMessageEvent):
+        if not self._managed_by_private_companion():
+            yield event.plain_result("请先安装并启用“我会永远陪着你”，创作能力统一在陪伴面板中管理。")
+            return
         if not self.enabled:
-            yield event.plain_result("独立创作扩展当前已关闭。")
+            yield event.plain_result("创作扩展当前已关闭。")
             return
         raw = str(getattr(event, "message_str", "") or "").strip()
         command_text = raw.split("创作", 1)[-1].strip() if "创作" in raw else ""
@@ -757,6 +720,11 @@ class ContentCompanionPlugin(Star):
 
     @filter.llm_tool(name="content_companion_view_work")
     async def content_companion_view_work(self, event: AstrMessageEvent, selector: str = "") -> str:
+        if not self._managed_by_private_companion():
+            return json.dumps(
+                {"status": "unavailable", "reason": "private_companion_required"},
+                ensure_ascii=False,
+            )
         project = self.extension_api.get_project(None, selector)
         if not project:
             return json.dumps({"status": "empty", "message": "创作书柜中还没有可读取的作品。"}, ensure_ascii=False)

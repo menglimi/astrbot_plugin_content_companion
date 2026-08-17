@@ -172,14 +172,24 @@ def test_qzone_status_marks_runtime_takeover() -> None:
     assert status["managed_by_private_companion"] is True
 
 
-def test_page_action_is_locked_during_runtime_takeover() -> None:
-    async def run() -> None:
-        plugin = ContentCompanionPlugin.__new__(ContentCompanionPlugin)
-        plugin._managed_by_private_companion = lambda: True
+def test_extension_status_requires_private_companion_host() -> None:
+    plugin = _migration_plugin(_Config({"enabled": True}))
+    plugin.enabled = True
+    plugin._managed_by_private_companion = lambda: False
 
-        result = await plugin._page_qzone_action()
+    status = ContentCompanionExtensionAPI(plugin).status()
 
-        assert result["ok"] is False
-        assert result["status"] == "managed_by_private_companion"
+    assert status["available"] is False
+    assert status["mode"] == "unavailable"
+    assert status["reason"] == "private_companion_required"
 
-    asyncio.run(run())
+
+def test_release_has_no_independent_page() -> None:
+    root = Path(__file__).resolve().parents[1]
+    metadata = (root / "metadata.yaml").read_text(encoding="utf-8")
+
+    assert "pages:" not in metadata
+    assert "此插件为“我会永远陪着你”插件的拓展程序，请到其拓展页进行配置。" in metadata
+    assert "独立页面" in metadata
+    page_root = root / "pages" / "qzone-companion"
+    assert not page_root.exists() or not any(page_root.iterdir())
