@@ -257,7 +257,7 @@ class StandaloneCreativeHost(CreativeMixin):
         except Exception:
             return {}
 
-    def _save_data_sync(self) -> None:
+    def _save_data_sync(self, *, sections: set[str] | None = None) -> None:
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.data_path.with_suffix(".tmp")
         temp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
